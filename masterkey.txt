@@ -1,0 +1,176 @@
+Based on installLaunchBrowserPending
+
+client hello random
+9B660E0BA9F8E6FBA9E815AF7DA58C9F1943BAE1768B6210AB14992B74961335
+server  hello random
+8D576D4E7E4BA72EBCF3D2C4739FAD683C10EEC5C76AA93A816020ABBC132204
+
+
+TLS1.0: rfc 2246
+
+psk key
+0123456789ABCDEFFEDCBA9876543210
+
+What is PRF:
+PRF(secret, label, seed) = P_MD5(S1, label + seed) XOR
+                                  P_SHA-1(S2, label + seed);
+
+The label is an ASCII string. It should be included in the exact form
+   it is given without a length byte or trailing null character.  For
+   example, the label "slithy toves" would be processed by hashing the
+   following bytes:
+
+       73 6C 69 74 68 79 20 74 6F 76 65 73
+
+ master_secret = PRF(pre_master_secret, "master secret",
+                           ClientHello.random + ServerHello.random)
+       [0..47];
+
+ TLS_RSA_PSK_WITH_3DES_EDE_CBC_SHA  RSA_PSK       3DES_EDE_CBC  SHA
+
+
+To generate the key material, compute
+
+       key_block = PRF(SecurityParameters.master_secret,
+                          "key expansion",
+                          SecurityParameters.server_random +
+                          SecurityParameters.client_random);
+
+   until enough output has been generated. Then the key_block is
+   partitioned as follows:
+
+       client_write_MAC_secret[SecurityParameters.hash_size]
+       server_write_MAC_secret[SecurityParameters.hash_size]
+       client_write_key[SecurityParameters.key_material_length]
+       server_write_key[SecurityParameters.key_material_length]
+       client_write_IV[SecurityParameters.IV_size]
+       server_write_IV[SecurityParameters.IV_size]
+
+
+
+
+                         Key      Expanded   Effective                IV    Block
+    Cipher       Type  Material Key Material  Key Bits  Size   Size
+
+    NULL       * Stream   0          0           0        0     N/A
+    IDEA_CBC     Block   16         16         128        8      8
+    RC2_CBC_40 * Block    5         16          40        8      8
+    RC4_40     * Stream   5         16          40        0     N/A
+    RC4_128      Stream  16         16         128        0     N/A
+    DES40_CBC  * Block    5          8          40        8      8
+    DES_CBC      Block    8          8          56        8      8
+    3DES_EDE_CBC Block   24         24         168        8      8
+
+The master secret is always exactly 48 bytes in length. The length of
+   the premaster secret will vary depending on key exchange method.
+
+In the absence of an application profile standard specifying
+   otherwise, a TLS compliant application MUST implement the cipher
+   suite TLS_DHE_DSS_WITH_3DES_EDE_CBC_SHA.
+
+
+ struct {
+        select (KeyExchangeAlgorithm) {
+            case rsa: EncryptedPreMasterSecret;
+            case diffie_hellman: DiffieHellmanClientPublicValue;
+        } exchange_keys;
+    } ClientKeyExchange;
+
+ struct {
+           enum { change_cipher_spec(1), (255) } type;
+       } ChangeCipherSpec;
+
+   The change cipher spec message is sent by both the client and server
+   to notify the receiving party that subsequent records will be
+   protected under the newly negotiated CipherSpec and keys
+
+
+
+7.4.9. Finished
+
+   When this message will be sent:
+       A finished message is always sent immediately after a change
+       cipher spec message to verify that the key exchange and
+       authentication processes were successful. It is essential that a
+       change cipher spec message be received between the other
+       handshake messages and the Finished message.
+
+   Meaning of this message:
+       The finished message is the first protected with the just-
+       negotiated algorithms, keys, and secrets. Recipients of finished
+       messages must verify that the contents are correct.  Once a side
+       has sent its Finished message and received and validated the
+       Finished message from its peer, it may begin to send and receive
+       application data over the connection.
+
+       struct {
+           opaque verify_data[12];
+       } Finished;
+
+       verify_data
+           PRF(master_secret, finished_label, MD5(handshake_messages) +
+           SHA-1(handshake_messages)) [0..11];
+
+       finished_label
+           For Finished messages sent by the client, the string "client
+           finished". For Finished messages sent by the server, the
+           string "server finished".
+
+	handshake_messages
+           All of the data from all handshake messages up to but not
+           including this message. This is only data visible at the
+           handshake layer and does not include record layer headers.
+
+           This is the concatenation of all the Handshake structures as
+           defined in 7.4 exchanged thus far.
+
+Sender.server?
+
+PSK: Pre-shared Key RFC 4279
+\
+
+ The premaster secret is formed as follows: if the PSK is N octets
+   long, concatenate a uint16 with the value N, N zero octets, a second
+   uint16 with the value N, and the PSK itself.
+
+
+
+psk = 0123456789ABCDEFFEDCBA9876543210
+n= 16
+so premaster secret = 00100000000000000000000000000000000000100123456789ABCDEFFEDCBA9876543210
+0x12+0x12 = 0x24 bytes
+
+
+PSK:
+CipherSuite                                               Key Exchange  Cipher       		Hash
+ TLS_PSK_WITH_3DES_EDE_CBC_SHA      PSK                3DES_EDE_CBC  	SHA
+
+::::::::stream-ciphered struct::::::
+stream-ciphered struct {
+           uint8 field1;
+           uint8 field2;
+           digitally-signed opaque hash[20];
+       } UserType;
+::::::::Security Parameters ::::::::::::
+struct {
+           ConnectionEnd          entity;
+           BulkCipherAlgorithm    bulk_cipher_algorithm;
+           CipherType             cipher_type;
+           uint8                  key_size;
+           uint8                  key_material_length;
+           IsExportable           is_exportable;
+           MACAlgorithm           mac_algorithm;
+           uint8                  hash_size;
+           CompressionMethod      compression_algorithm;
+           opaque                 master_secret[48];
+           opaque                 client_random[32];
+           opaque                 server_random[32];
+       } SecurityParameters;
+
+       client write MAC secret
+       server write MAC secret
+       client write key
+       server write key
+       client write IV (for block ciphers only)
+       server write IV (for block ciphers only)
+
